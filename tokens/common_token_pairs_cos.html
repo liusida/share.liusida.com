@@ -3,11 +3,37 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Qwen/Qwen3.5-0.8B — cos &gt; 0.4 (paginated)</title>
+  <title>Token cosine pairs</title>
   <style>
     /* --- layout / base --- */
     body { font-family: system-ui, sans-serif; margin: 1rem; }
-    #meta { margin-bottom: 0.75rem; }
+    .page-head { margin-bottom: 0.75rem; }
+    .page-title {
+      font-size: 1.35rem; font-weight: 650; line-height: 1.25;
+      margin: 0; letter-spacing: -0.02em;
+    }
+    .page-subtitle {
+      margin: 0.35rem 0 0;
+      font-size: 0.95rem; font-weight: 450;
+      color: #57534e;
+    }
+    .page-foot {
+      margin-top: 1.75rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid #e7e5e4;
+      font-size: 0.78rem;
+      color: #78716c;
+      line-height: 1.5;
+      max-width: 44rem;
+    }
+    .page-foot p { margin: 0; }
+    .page-foot code {
+      font-size: 0.92em;
+      color: #44403c;
+      background: #f5f5f4;
+      padding: 0.06em 0.28em;
+      border-radius: 3px;
+    }
 
     /* --- pager --- */
     .pager {
@@ -92,7 +118,10 @@
   </style>
 </head>
 <body>
-  <p id="meta"></p>
+  <header class="page-head">
+    <h1 class="page-title" id="page-title">Token cosine pairs</h1>
+    <p class="page-subtitle" id="page-subtitle"></p>
+  </header>
   <div id="search-wrap">
     <label for="search-input">Search</label>
     <input type="search" id="search-input"
@@ -123,6 +152,8 @@
   </div>
 
   <div class="pager" id="pager-bottom"></div>
+
+  <footer class="page-foot" id="page-foot" hidden></footer>
 
   <script>
     const PAGE_SIZE = 100;
@@ -311,17 +342,35 @@
 
     function pageNumbersToShow(cur, total) {
       const out = [];
-      if (total <= 12) {
+      const showAllThreshold = 12;
+      if (total <= showAllThreshold) {
         for (let i = 1; i <= total; i++) out.push(i);
         return out;
       }
+
+      const target = 5;
+      let start = Math.max(1, cur - 2);
+      let end = Math.min(total, cur + 2);
+      while (end - start + 1 < target && end < total) end++;
+      while (end - start + 1 < target && start > 1) start--;
+
+      const appendTail = () => {
+        if (end < total) {
+          if (end < total - 1) out.push("…");
+          out.push(total);
+        }
+      };
+
+      if (start === 1) {
+        for (let i = 1; i <= end; i++) out.push(i);
+        appendTail();
+        return out;
+      }
+
       out.push(1);
-      const windowStart = Math.max(2, cur - 2);
-      const windowEnd = Math.min(total - 1, cur + 2);
-      if (windowStart > 2) out.push("…");
-      for (let i = windowStart; i <= windowEnd; i++) out.push(i);
-      if (windowEnd < total - 1) out.push("…");
-      if (total > 1) out.push(total);
+      if (start > 2) out.push("…");
+      for (let i = start; i <= end; i++) out.push(i);
+      appendTail();
       return out;
     }
 
@@ -395,7 +444,9 @@
 
     async function load() {
       document.getElementById("err").textContent = "";
-      document.getElementById("meta").innerHTML = "";
+      document.getElementById("page-subtitle").replaceChildren();
+      document.getElementById("page-foot").replaceChildren();
+      document.getElementById("page-foot").hidden = true;
       try {
         const r = await fetch(DATA_URL);
         if (!r.ok) throw new Error(r.status + " " + r.statusText);
@@ -407,13 +458,44 @@
         if (searchInp) searchInp.value = "";
 
         const mid = data.model_id != null ? data.model_id : "";
-        document.title = mid + " — cos > " + data.cos_min;
-        document.getElementById("meta").innerHTML =
-          "<strong>" + escHtml(mid) + "</strong> — <strong>cos &gt; " + data.cos_min + "</strong> — " +
-          data.n_common_rows +
-          " common-embedding rows — <strong>" + total + "</strong> pairs — " +
+        const cosMin = data.cos_min;
+        const shortModel =
+          typeof mid === "string" && mid.includes("/") ? mid.split("/").pop() : mid;
+
+        document.title =
+          (shortModel ? shortModel + " · " : "") + "token cosine pairs (cos > " + cosMin + ")";
+
+        document.getElementById("page-title").textContent = "Token cosine pairs";
+        const sub = document.getElementById("page-subtitle");
+        if (mid) sub.append(document.createTextNode(mid + " · "));
+        sub.append(document.createTextNode("common tokens · "));
+        const thr = document.createElement("strong");
+        thr.textContent = "cos > " + cosMin;
+        sub.append(thr);
+
+        const nCommon =
+          typeof data.n_common_rows === "number"
+            ? data.n_common_rows.toLocaleString()
+            : String(data.n_common_rows);
+        const totalStr =
+          typeof total === "number" ? total.toLocaleString() : String(total);
+        const foot = document.getElementById("page-foot");
+        foot.innerHTML =
+          "<p><span aria-hidden=\"true\">*</span> " +
+          "<strong>" +
+          escHtml(nCommon) +
+          "</strong> tokenizer rows with a common embedding row across both sides; " +
+          "<strong>" +
+          escHtml(totalStr) +
+          "</strong> pairs with <strong>cos &gt; " +
+          escHtml(String(cosMin)) +
+          "</strong>; " +
+          "<strong>" +
           PAGE_SIZE +
-          " per page. Search filters by <code>token_i</code> / <code>token_j</code> (substring, or whole token if Exact).";
+          "</strong> pairs per page. " +
+          "Search uses <code>token_i</code> and <code>token_j</code> only: substring match, " +
+          "or <strong>Exact</strong> for whole tokens (leading <code>_</code> ↔ raw <code>Ġ</code>/<code>▁</code>).</p>";
+        foot.hidden = false;
 
         const exactInp = document.getElementById("search-exact");
         if (exactInp) exactInp.checked = false;
