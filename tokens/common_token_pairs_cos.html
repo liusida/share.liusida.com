@@ -1,274 +1,444 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Qwen/Qwen3.5-0.8B — cos &gt; 0.4 (paginated)</title>
-<style>
-body { font-family: system-ui, sans-serif; margin: 1rem; }
-#meta { margin-bottom: 0.75rem; }
-.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.75rem 0; }
-.pager button { padding: 0.35rem 0.65rem; cursor: pointer; min-height: 2.25rem; }
-.pager .pages { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
-.pager button.page-num { min-width: 2.25rem; }
-.pager button.active { font-weight: 700; background: #2563eb; color: #fff; border-color: #2563eb; }
-.pager .gap { padding: 0 0.25rem; color: #666; }
-.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0.5rem 0; }
-table { border-collapse: collapse; width: 100%; max-width: 100%; }
-th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; text-align: left; word-break: break-all; }
-th { background: #f0f0f0; position: sticky; top: 0; z-index: 1; box-shadow: 0 1px 0 #ccc; }
-tr:nth-child(even) { background: #fafafa; }
-#err { color: #b91c1c; }
-#search-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.5rem 0 0.25rem; }
-#search-wrap label { font-weight: 600; }
-#search-input { min-width: 18rem; width: 100%; max-width: 24rem; padding: 0.35rem 0.5rem; font-size: 16px; }
-#search-hint { font-size: 12px; color: #555; max-width: 40rem; }
-.vocab-sub { font-size: 0.78em; color: #6b7280; font-weight: 400; margin-left: 0.2em; white-space: nowrap; }
-@media (max-width: 47.99rem) {
-  body { margin: 0.75rem; }
-  #search-input { min-width: 0; max-width: none; flex: 1 1 12rem; }
-  th { position: static; z-index: auto; box-shadow: none; }
-}
-</style></head><body>
-<p id="meta"></p>
-<div id="search-wrap">
-<label for="search-input">Search</label>
-<input type="search" id="search-input" placeholder="substring in token_i or token_j only (matches display _ and raw Ġ/▁)" autocomplete="off" />
-<span id="search-hint"></span>
-</div>
-<p id="err"></p>
-<div class="pager" id="pager-top"></div>
-<div class="table-scroll" role="region" aria-label="Token pair cosine table">
-<table>
-<thead><tr><th>#</th><th>cos</th><th>token_i</th><th>token_j</th></tr></thead>
-<tbody id="tbody"></tbody>
-</table>
-</div>
-<div class="pager" id="pager-bottom"></div>
-<script>
-const PAGE_SIZE = 100;
-const DATA_URL = "common_token_pairs_cos_data.json";
-let pairs = [];
-let totalPages = 0;
-let currentPage = 1;
-let searchQuery = "";
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen/Qwen3.5-0.8B — cos &gt; 0.4 (paginated)</title>
+  <style>
+    /* --- layout / base --- */
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    #meta { margin-bottom: 0.75rem; }
 
-function el(tag, text) {
-  const e = document.createElement(tag);
-  if (text != null) e.textContent = text;
-  return e;
-}
-
-function escHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function displayTokenPiece(t) {
-  if (t == null) return "";
-  let s = String(t);
-  s = s.split("Ġ").join("_");
-  s = s.split("▁").join("_");
-  return s;
-}
-
-function appendTokenWithVocab(tr, row, which) {
-  const td = document.createElement("td");
-  const tok = which === "i" ? row.token_i : row.token_j;
-  const vid = which === "i" ? row.vocab_i : row.vocab_j;
-  td.appendChild(document.createTextNode(displayTokenPiece(tok)));
-  const sub = document.createElement("span");
-  sub.className = "vocab-sub";
-  sub.textContent = " (" + vid + ")";
-  td.appendChild(sub);
-  tr.appendChild(td);
-}
-
-function rowMatchesSearch(row, q) {
-  if (!q) return true;
-  const ql = q.toLowerCase();
-  const ti = displayTokenPiece(row.token_i).toLowerCase();
-  const tj = displayTokenPiece(row.token_j).toLowerCase();
-  const rawTi = String(row.token_i).toLowerCase();
-  const rawTj = String(row.token_j).toLowerCase();
-  return (
-    ti.includes(ql) ||
-    tj.includes(ql) ||
-    rawTi.includes(ql) ||
-    rawTj.includes(ql)
-  );
-}
-
-function getFilteredPairs() {
-  const q = searchQuery.trim();
-  if (!q) return pairs;
-  return pairs.filter((row) => rowMatchesSearch(row, q));
-}
-
-function updateSearchHint() {
-  const elh = document.getElementById("search-hint");
-  if (!elh) return;
-  const n = getFilteredPairs().length;
-  if (!searchQuery.trim()) {
-    elh.textContent = "";
-    return;
-  }
-  elh.textContent = n + " match" + (n === 1 ? "" : "es") + " (of " + pairs.length + " pairs).";
-}
-
-function renderTable(page) {
-  const tb = document.getElementById("tbody");
-  tb.replaceChildren();
-  if (!pairs.length) return;
-  const list = getFilteredPairs();
-  totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
-  const p = Math.max(1, Math.min(page, totalPages));
-  currentPage = p;
-  if (!list.length) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 4;
-    td.style.textAlign = "center";
-    td.style.color = "#666";
-    td.textContent = searchQuery.trim() ? "No pairs match this search." : "No data.";
-    tr.appendChild(td);
-    tb.appendChild(tr);
-    updateSearchHint();
-    return;
-  }
-  const start = (p - 1) * PAGE_SIZE;
-  const slice = list.slice(start, Math.min(start + PAGE_SIZE, list.length));
-  for (const row of slice) {
-    const tr = document.createElement("tr");
-    const tdRank = document.createElement("td");
-    tdRank.textContent = row.rank;
-    tr.appendChild(tdRank);
-    const tdCos = document.createElement("td");
-    tdCos.textContent = Number(row.cos).toFixed(3);
-    tr.appendChild(tdCos);
-    appendTokenWithVocab(tr, row, "i");
-    appendTokenWithVocab(tr, row, "j");
-    tb.appendChild(tr);
-  }
-  updateSearchHint();
-}
-
-function pageNumbersToShow(cur, total) {
-  const out = [];
-  if (total <= 12) {
-    for (let i = 1; i <= total; i++) out.push(i);
-    return out;
-  }
-  out.push(1);
-  const windowStart = Math.max(2, cur - 2);
-  const windowEnd = Math.min(total - 1, cur + 2);
-  if (windowStart > 2) out.push("…");
-  for (let i = windowStart; i <= windowEnd; i++) out.push(i);
-  if (windowEnd < total - 1) out.push("…");
-  if (total > 1) out.push(total);
-  return out;
-}
-
-function refreshPagers() {
-  buildPager("pager-top");
-  buildPager("pager-bottom");
-}
-
-function buildPager(containerId) {
-  const host = document.getElementById(containerId);
-  host.replaceChildren();
-  if (!pairs.length) return;
-
-  const list = getFilteredPairs();
-  const tp = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
-  const cp = Math.min(currentPage, tp);
-
-  const prev = el("button", "Prev");
-  prev.disabled = cp <= 1 || list.length === 0;
-  prev.onclick = () => { renderTable(cp - 1); refreshPagers(); };
-
-  const next = el("button", "Next");
-  next.disabled = cp >= tp || list.length === 0;
-  next.onclick = () => { renderTable(cp + 1); refreshPagers(); };
-
-  let labelText = "Page " + cp + " / " + tp;
-  if (searchQuery.trim()) {
-    labelText += " — " + list.length + " matches (of " + pairs.length + " total)";
-  } else {
-    labelText += " — " + pairs.length + " pairs";
-  }
-  const label = el("span", labelText);
-
-  const jump = el("span");
-  jump.append("Go to ");
-  const inp = document.createElement("input");
-  inp.type = "number";
-  inp.min = 1;
-  inp.max = tp;
-  inp.value = String(cp);
-  inp.style.width = "5rem";
-  inp.addEventListener("change", () => {
-    const v = parseInt(inp.value, 10);
-    if (!Number.isFinite(v)) return;
-    renderTable(v);
-    refreshPagers();
-  });
-  jump.appendChild(inp);
-
-  const pagesWrap = el("div");
-  pagesWrap.className = "pages";
-  for (const p of pageNumbersToShow(cp, tp)) {
-    if (p === "…") {
-      const s = el("span", "…");
-      s.className = "gap";
-      pagesWrap.appendChild(s);
-      continue;
+    /* --- pager --- */
+    .pager {
+      display: flex; flex-wrap: wrap; align-items: center;
+      gap: 0.5rem; margin: 0.75rem 0;
     }
-    const b = el("button", String(p));
-    b.className = "page-num" + (p === cp ? " active" : "");
-    b.onclick = () => { renderTable(p); refreshPagers(); };
-    pagesWrap.appendChild(b);
-  }
+    .pager button { padding: 0.35rem 0.65rem; cursor: pointer; min-height: 2.25rem; }
+    .pager .pages { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
+    .pager button.page-num { min-width: 2.25rem; }
+    .pager button.active {
+      font-weight: 700; background: #2563eb; color: #fff; border-color: #2563eb;
+    }
+    .pager .gap { padding: 0 0.25rem; color: #666; }
 
-  host.append(prev, label, next, jump, pagesWrap);
-}
+    /* --- table --- */
+    .table-scroll {
+      overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0.5rem 0;
+    }
+    table { border-collapse: collapse; width: 100%; max-width: 100%; }
+    th, td {
+      border: 1px solid #ccc; padding: 6px 8px; font-size: 13px;
+      text-align: left; word-break: break-all;
+    }
+    th {
+      background: #f0f0f0; position: sticky; top: 0; z-index: 1;
+      box-shadow: 0 1px 0 #ccc;
+    }
+    tr:nth-child(even) { background: #fafafa; }
 
-async function load() {
-  document.getElementById("err").textContent = "";
-  document.getElementById("meta").innerHTML = "";
-  try {
-    const r = await fetch(DATA_URL);
-    if (!r.ok) throw new Error(r.status + " " + r.statusText);
-    const data = await r.json();
-    pairs = data.pairs || [];
-    const total = data.total_pairs ?? pairs.length;
-    searchQuery = "";
-    const searchInp = document.getElementById("search-input");
-    if (searchInp) searchInp.value = "";
-    const mid = data.model_id != null ? data.model_id : "";
-    document.title = mid + " — cos > " + data.cos_min;
-    document.getElementById("meta").innerHTML =
-      "<strong>" + escHtml(mid) + "</strong> — <strong>cos &gt; " + data.cos_min + "</strong> — " +
-      data.n_common_rows +
-      " common-embedding rows — <strong>" + total + "</strong> pairs — " +
-      PAGE_SIZE +
-      " per page. Search filters rows by <code>token_i</code> / <code>token_j</code> substrings only.";
-    if (searchInp) {
-      searchInp.addEventListener("input", () => {
-        searchQuery = searchInp.value;
-        currentPage = 1;
-        renderTable(1);
-        refreshPagers();
+    th:first-child,
+    td:first-child {
+      color: #a8a29e;
+      font-size: 0.6em;
+      font-weight: 400;
+      font-variant-numeric: tabular-nums;
+      width: 1%;
+      white-space: nowrap;
+      padding-left: 6px;
+      padding-right: 5px;
+    }
+
+    .cos-cell { white-space: nowrap; vertical-align: baseline; }
+    .cos-wrap {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.35rem;
+    }
+    .cos-pie {
+      flex: 0 0 auto;
+      display: inline-block;
+      overflow: visible;
+      vertical-align: baseline;
+    }
+
+    /* --- search --- */
+    #search-wrap {
+      display: flex; flex-wrap: wrap; align-items: center;
+      gap: 0.5rem; margin: 0.5rem 0 0.25rem;
+    }
+    #search-wrap label { font-weight: 600; }
+    #search-input {
+      min-width: 18rem; width: 100%; max-width: 24rem;
+      padding: 0.35rem 0.5rem; font-size: 16px;
+    }
+    #search-hint { font-size: 12px; color: #555; max-width: 40rem; }
+    #err { color: #b91c1c; }
+
+    .vocab-sub {
+      font-size: 0.78em; color: #6b7280; font-weight: 400;
+      margin-left: 0.2em; white-space: nowrap;
+    }
+    .search-exact {
+      display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap;
+    }
+    .search-exact input { width: 1rem; height: 1rem; margin: 0; }
+
+    @media (max-width: 47.99rem) {
+      body { margin: 0.75rem; }
+      #search-input { min-width: 0; max-width: none; flex: 1 1 12rem; }
+      th { position: static; z-index: auto; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <p id="meta"></p>
+  <div id="search-wrap">
+    <label for="search-input">Search</label>
+    <input type="search" id="search-input"
+      placeholder="token_i or token_j only; substring unless Exact is on"
+      autocomplete="off">
+    <span class="search-exact" title="Whole token; case-insensitive. Leading _ in the query matches display _ and raw Ġ/▁; omit _ to match those tokens too.">
+      <input type="checkbox" id="search-exact">
+      <label for="search-exact">Exact</label>
+    </span>
+    <span id="search-hint"></span>
+  </div>
+  <p id="err"></p>
+
+  <div class="pager" id="pager-top"></div>
+
+  <div class="table-scroll" role="region" aria-label="Token pair cosine table">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th title="θ = acos(cos); horizontal ray along text baseline, second ray up–right">cos</th>
+          <th>token_i</th>
+          <th>token_j</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="pager" id="pager-bottom"></div>
+
+  <script>
+    const PAGE_SIZE = 100;
+    const DATA_URL = "common_token_pairs_cos_data.json";
+
+    let pairs = [];
+    let totalPages = 0;
+    let currentPage = 1;
+    let searchQuery = "";
+
+    function el(tag, text) {
+      const node = document.createElement(tag);
+      if (text != null) node.textContent = text;
+      return node;
+    }
+
+    function escHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    const SVG_NS = "http://www.w3.org/2000/svg";
+
+    function displayTokenPiece(t) {
+      if (t == null) return "";
+      return String(t).split("Ġ").join("_").split("▁").join("_");
+    }
+
+    function cosAnglePieSvg(cosVal) {
+      const c = Number(cosVal);
+      const clamped = Number.isFinite(c) ? Math.min(1, Math.max(-1, c)) : 1;
+      const theta = Math.acos(clamped);
+      const deg = (theta * 180) / Math.PI;
+
+      const vx = 2;
+      const r = 11;
+      const vy = 17;
+      const vbW = vx + r + 3;
+      const vbH = vy + 2;
+
+      const svg = document.createElementNS(SVG_NS, "svg");
+      svg.setAttribute("width", String(vbW));
+      svg.setAttribute("height", String(vbH));
+      svg.setAttribute("viewBox", `0 0 ${vbW} ${vbH}`);
+      svg.setAttribute("class", "cos-pie");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+
+      if (theta > 1e-6) {
+        const x1 = vx + r;
+        const y1 = vy;
+        const x2 = vx + r * Math.cos(theta);
+        const y2 = vy - r * Math.sin(theta);
+        const largeArc = theta > Math.PI ? 1 : 0;
+        const path = document.createElementNS(SVG_NS, "path");
+        path.setAttribute(
+          "d",
+          `M ${vx} ${vy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 0 ${x2} ${y2} Z`
+        );
+        path.setAttribute("fill", "#3b82f6");
+        path.setAttribute("fill-opacity", "0.9");
+        path.setAttribute("stroke", "#1e40af");
+        path.setAttribute("stroke-width", "0.65");
+        path.setAttribute("stroke-linejoin", "round");
+        svg.appendChild(path);
+      }
+
+      return { svg, degStr: deg.toFixed(1) + "°", theta };
+    }
+
+    function appendCosCell(tr, cosVal) {
+      const td = document.createElement("td");
+      td.className = "cos-cell";
+      const wrap = document.createElement("span");
+      wrap.className = "cos-wrap";
+      const { svg, degStr, theta } = cosAnglePieSvg(cosVal);
+      wrap.title = "θ = acos(cos) ≈ " + degStr + " (" + theta.toFixed(4) + " rad)";
+      wrap.appendChild(svg);
+      wrap.appendChild(
+        document.createTextNode(Number(cosVal).toFixed(3))
+      );
+      td.appendChild(wrap);
+      tr.appendChild(td);
+    }
+
+    function appendTokenWithVocab(tr, row, which) {
+      const td = document.createElement("td");
+      const tok = which === "i" ? row.token_i : row.token_j;
+      const vid = which === "i" ? row.vocab_i : row.vocab_j;
+      td.appendChild(document.createTextNode(displayTokenPiece(tok)));
+      const sub = document.createElement("span");
+      sub.className = "vocab-sub";
+      sub.textContent = " (" + vid + ")";
+      td.appendChild(sub);
+      tr.appendChild(td);
+    }
+
+    function exactTokenMatches(displayStr, rawStr, ql) {
+      if (displayStr === ql || rawStr === ql) return true;
+      if (displayStr.startsWith("_") && displayStr.slice(1) === ql) return true;
+      if (ql.startsWith("_") && ql.slice(1) === displayStr) return true;
+      const g = "Ġ";
+      const u = "▁";
+      if (ql.startsWith("_")) {
+        const rest = ql.slice(1);
+        if (rawStr === g + rest || rawStr === u + rest) return true;
+      }
+      if (rawStr === g + ql || rawStr === u + ql) return true;
+      return false;
+    }
+
+    function rowMatchesSearch(row, q) {
+      if (!q) return true;
+      const ql = q.toLowerCase();
+      const ti = displayTokenPiece(row.token_i).toLowerCase();
+      const tj = displayTokenPiece(row.token_j).toLowerCase();
+      const rawTi = String(row.token_i).toLowerCase();
+      const rawTj = String(row.token_j).toLowerCase();
+      const exact = document.getElementById("search-exact")?.checked;
+      if (exact) {
+        return exactTokenMatches(ti, rawTi, ql) || exactTokenMatches(tj, rawTj, ql);
+      }
+      return (
+        ti.includes(ql) || tj.includes(ql) ||
+        rawTi.includes(ql) || rawTj.includes(ql)
+      );
+    }
+
+    function getFilteredPairs() {
+      const q = searchQuery.trim();
+      if (!q) return pairs;
+      return pairs.filter((row) => rowMatchesSearch(row, q));
+    }
+
+    function updateSearchHint() {
+      const hint = document.getElementById("search-hint");
+      if (!hint) return;
+      const n = getFilteredPairs().length;
+      if (!searchQuery.trim()) {
+        hint.textContent = "";
+        return;
+      }
+      hint.textContent = n + " match" + (n === 1 ? "" : "es") + " (of " + pairs.length + " pairs).";
+    }
+
+    function renderTable(page) {
+      const tb = document.getElementById("tbody");
+      tb.replaceChildren();
+      if (!pairs.length) return;
+
+      const list = getFilteredPairs();
+      totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+      const p = Math.max(1, Math.min(page, totalPages));
+      currentPage = p;
+
+      if (!list.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 4;
+        td.style.textAlign = "center";
+        td.style.color = "#666";
+        td.textContent = searchQuery.trim() ? "No pairs match this search." : "No data.";
+        tr.appendChild(td);
+        tb.appendChild(tr);
+        updateSearchHint();
+        return;
+      }
+
+      const start = (p - 1) * PAGE_SIZE;
+      const slice = list.slice(start, Math.min(start + PAGE_SIZE, list.length));
+      for (const row of slice) {
+        const tr = document.createElement("tr");
+        const tdRank = document.createElement("td");
+        tdRank.textContent = row.rank;
+        tr.appendChild(tdRank);
+        appendCosCell(tr, row.cos);
+        appendTokenWithVocab(tr, row, "i");
+        appendTokenWithVocab(tr, row, "j");
+        tb.appendChild(tr);
+      }
+      updateSearchHint();
+    }
+
+    function pageNumbersToShow(cur, total) {
+      const out = [];
+      if (total <= 12) {
+        for (let i = 1; i <= total; i++) out.push(i);
+        return out;
+      }
+      out.push(1);
+      const windowStart = Math.max(2, cur - 2);
+      const windowEnd = Math.min(total - 1, cur + 2);
+      if (windowStart > 2) out.push("…");
+      for (let i = windowStart; i <= windowEnd; i++) out.push(i);
+      if (windowEnd < total - 1) out.push("…");
+      if (total > 1) out.push(total);
+      return out;
+    }
+
+    function refreshPagers() {
+      buildPager("pager-top");
+      buildPager("pager-bottom");
+    }
+
+    function goToPage(page) {
+      renderTable(page);
+      refreshPagers();
+    }
+
+    function buildPager(containerId) {
+      const host = document.getElementById(containerId);
+      host.replaceChildren();
+      if (!pairs.length) return;
+
+      const list = getFilteredPairs();
+      const tp = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+      const cp = Math.min(currentPage, tp);
+
+      const prev = el("button", "Prev");
+      prev.disabled = cp <= 1 || list.length === 0;
+      prev.onclick = () => goToPage(cp - 1);
+
+      const next = el("button", "Next");
+      next.disabled = cp >= tp || list.length === 0;
+      next.onclick = () => goToPage(cp + 1);
+
+      let labelText = "Page " + cp + " / " + tp;
+      if (searchQuery.trim()) {
+        labelText += " — " + list.length + " matches (of " + pairs.length + " total)";
+      } else {
+        labelText += " — " + pairs.length + " pairs";
+      }
+      const label = el("span", labelText);
+
+      const jump = el("span");
+      jump.append("Go to ");
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.min = 1;
+      inp.max = tp;
+      inp.value = String(cp);
+      inp.style.width = "5rem";
+      inp.addEventListener("change", () => {
+        const v = parseInt(inp.value, 10);
+        if (!Number.isFinite(v)) return;
+        goToPage(v);
       });
+      jump.appendChild(inp);
+
+      const pagesWrap = el("div");
+      pagesWrap.className = "pages";
+      for (const p of pageNumbersToShow(cp, tp)) {
+        if (p === "…") {
+          const s = el("span", "…");
+          s.className = "gap";
+          pagesWrap.appendChild(s);
+          continue;
+        }
+        const b = el("button", String(p));
+        b.className = "page-num" + (p === cp ? " active" : "");
+        b.onclick = () => goToPage(p);
+        pagesWrap.appendChild(b);
+      }
+
+      host.append(prev, label, next, jump, pagesWrap);
     }
-    renderTable(1);
-    refreshPagers();
-  } catch (e) {
-    document.getElementById("err").textContent =
-      "Could not load " + DATA_URL + " (open via HTTP same folder as this HTML, e.g. /outputs/…). " + e;
-  }
-}
-load();
-</script>
-</body></html>
+
+    async function load() {
+      document.getElementById("err").textContent = "";
+      document.getElementById("meta").innerHTML = "";
+      try {
+        const r = await fetch(DATA_URL);
+        if (!r.ok) throw new Error(r.status + " " + r.statusText);
+        const data = await r.json();
+        pairs = data.pairs || [];
+        const total = data.total_pairs ?? pairs.length;
+        searchQuery = "";
+        const searchInp = document.getElementById("search-input");
+        if (searchInp) searchInp.value = "";
+
+        const mid = data.model_id != null ? data.model_id : "";
+        document.title = mid + " — cos > " + data.cos_min;
+        document.getElementById("meta").innerHTML =
+          "<strong>" + escHtml(mid) + "</strong> — <strong>cos &gt; " + data.cos_min + "</strong> — " +
+          data.n_common_rows +
+          " common-embedding rows — <strong>" + total + "</strong> pairs — " +
+          PAGE_SIZE +
+          " per page. Search filters by <code>token_i</code> / <code>token_j</code> (substring, or whole token if Exact).";
+
+        const exactInp = document.getElementById("search-exact");
+        if (exactInp) exactInp.checked = false;
+
+        if (searchInp) {
+          searchInp.addEventListener("input", () => {
+            searchQuery = searchInp.value;
+            currentPage = 1;
+            goToPage(1);
+          });
+        }
+        if (exactInp) {
+          exactInp.addEventListener("change", () => {
+            currentPage = 1;
+            goToPage(1);
+          });
+        }
+        goToPage(1);
+      } catch (e) {
+        document.getElementById("err").textContent =
+          "Could not load " + DATA_URL + " (open via HTTP same folder as this HTML, e.g. /outputs/…). " + e;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
