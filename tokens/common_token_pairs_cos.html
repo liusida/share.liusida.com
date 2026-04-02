@@ -145,7 +145,7 @@ function renderTable(page) {
     tdRank.textContent = row.rank;
     tr.appendChild(tdRank);
     const tdCos = document.createElement("td");
-    tdCos.textContent = row.cos;
+    tdCos.textContent = Number(row.cos).toFixed(3);
     tr.appendChild(tdCos);
     appendTokenWithVocab(tr, row, "i");
     appendTokenWithVocab(tr, row, "j");
