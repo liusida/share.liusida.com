@@ -1,24 +1,31 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Qwen/Qwen3.5-0.8B — cos &gt; 0.4 (paginated)</title>
 <style>
 body { font-family: system-ui, sans-serif; margin: 1rem; }
 #meta { margin-bottom: 0.75rem; }
 .pager { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.75rem 0; }
-.pager button { padding: 0.35rem 0.65rem; cursor: pointer; }
+.pager button { padding: 0.35rem 0.65rem; cursor: pointer; min-height: 2.25rem; }
 .pager .pages { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
 .pager button.page-num { min-width: 2.25rem; }
 .pager button.active { font-weight: 700; background: #2563eb; color: #fff; border-color: #2563eb; }
 .pager .gap { padding: 0 0.25rem; color: #666; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0.5rem 0; }
 table { border-collapse: collapse; width: 100%; max-width: 100%; }
 th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; text-align: left; word-break: break-all; }
-th { background: #f0f0f0; position: sticky; top: 0; }
+th { background: #f0f0f0; position: sticky; top: 0; z-index: 1; box-shadow: 0 1px 0 #ccc; }
 tr:nth-child(even) { background: #fafafa; }
 #err { color: #b91c1c; }
 #search-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.5rem 0 0.25rem; }
 #search-wrap label { font-weight: 600; }
-#search-input { min-width: 18rem; padding: 0.35rem 0.5rem; font-size: 14px; }
+#search-input { min-width: 18rem; width: 100%; max-width: 24rem; padding: 0.35rem 0.5rem; font-size: 16px; }
 #search-hint { font-size: 12px; color: #555; max-width: 40rem; }
+@media (max-width: 47.99rem) {
+  body { margin: 0.75rem; }
+  #search-input { min-width: 0; max-width: none; flex: 1 1 12rem; }
+  th { position: static; z-index: auto; box-shadow: none; }
+}
 </style></head><body>
 <p id="meta"></p>
 <div id="search-wrap">
@@ -28,10 +35,12 @@ tr:nth-child(even) { background: #fafafa; }
 </div>
 <p id="err"></p>
 <div class="pager" id="pager-top"></div>
+<div class="table-scroll" role="region" aria-label="Token pair cosine table">
 <table>
 <thead><tr><th>#</th><th>cos</th><th>token_i</th><th>token_j</th><th>vocab_i</th><th>vocab_j</th></tr></thead>
 <tbody id="tbody"></tbody>
 </table>
+</div>
 <div class="pager" id="pager-bottom"></div>
 <script>
 const PAGE_SIZE = 100;
