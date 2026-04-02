@@ -21,6 +21,7 @@ tr:nth-child(even) { background: #fafafa; }
 #search-wrap label { font-weight: 600; }
 #search-input { min-width: 18rem; width: 100%; max-width: 24rem; padding: 0.35rem 0.5rem; font-size: 16px; }
 #search-hint { font-size: 12px; color: #555; max-width: 40rem; }
+.vocab-sub { font-size: 0.78em; color: #6b7280; font-weight: 400; margin-left: 0.2em; white-space: nowrap; }
 @media (max-width: 47.99rem) {
   body { margin: 0.75rem; }
   #search-input { min-width: 0; max-width: none; flex: 1 1 12rem; }
@@ -37,7 +38,7 @@ tr:nth-child(even) { background: #fafafa; }
 <div class="pager" id="pager-top"></div>
 <div class="table-scroll" role="region" aria-label="Token pair cosine table">
 <table>
-<thead><tr><th>#</th><th>cos</th><th>token_i</th><th>token_j</th><th>vocab_i</th><th>vocab_j</th></tr></thead>
+<thead><tr><th>#</th><th>cos</th><th>token_i</th><th>token_j</th></tr></thead>
 <tbody id="tbody"></tbody>
 </table>
 </div>
@@ -70,6 +71,18 @@ function displayTokenPiece(t) {
   s = s.split("Ġ").join("_");
   s = s.split("▁").join("_");
   return s;
+}
+
+function appendTokenWithVocab(tr, row, which) {
+  const td = document.createElement("td");
+  const tok = which === "i" ? row.token_i : row.token_j;
+  const vid = which === "i" ? row.vocab_i : row.vocab_j;
+  td.appendChild(document.createTextNode(displayTokenPiece(tok)));
+  const sub = document.createElement("span");
+  sub.className = "vocab-sub";
+  sub.textContent = " (" + vid + ")";
+  td.appendChild(sub);
+  tr.appendChild(td);
 }
 
 function rowMatchesSearch(row, q) {
@@ -115,7 +128,7 @@ function renderTable(page) {
   if (!list.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 6;
+    td.colSpan = 4;
     td.style.textAlign = "center";
     td.style.color = "#666";
     td.textContent = searchQuery.trim() ? "No pairs match this search." : "No data.";
@@ -128,13 +141,14 @@ function renderTable(page) {
   const slice = list.slice(start, Math.min(start + PAGE_SIZE, list.length));
   for (const row of slice) {
     const tr = document.createElement("tr");
-    for (const k of ["rank", "cos", "token_i", "token_j", "vocab_i", "vocab_j"]) {
-      const td = document.createElement("td");
-      const v = row[k];
-      td.textContent =
-        k === "token_i" || k === "token_j" ? displayTokenPiece(v) : v;
-      tr.appendChild(td);
-    }
+    const tdRank = document.createElement("td");
+    tdRank.textContent = row.rank;
+    tr.appendChild(tdRank);
+    const tdCos = document.createElement("td");
+    tdCos.textContent = row.cos;
+    tr.appendChild(tdCos);
+    appendTokenWithVocab(tr, row, "i");
+    appendTokenWithVocab(tr, row, "j");
     tb.appendChild(tr);
   }
   updateSearchHint();
