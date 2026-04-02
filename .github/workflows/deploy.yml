@@ -40,7 +40,8 @@ jobs:
           PORT="${SSH_PORT:-22}"
           RSYNC_RSH="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -p $PORT"
           # Omit repo metadata; add more --exclude lines if needed.
-          rsync -avz --delete \
+          # --mkpath creates missing destination directories (fix mkdir ENOENT when parents are missing).
+          rsync -avz --delete --mkpath \
             --exclude '.git/' \
             --exclude '.github/' \
             -e "$RSYNC_RSH" \
